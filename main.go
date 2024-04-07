@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -30,8 +31,9 @@ func (i item) FilterValue() string { return i.title }
 type viewMode string
 
 const (
-	viewModeList viewMode = "list"
-	viewModeAdd  viewMode = "add"
+	viewModeList   viewMode = "list"
+	viewModeAdd    viewMode = "add"
+	viewModeDelete viewMode = "delete"
 )
 
 // Core model for storing states in BubbleTea
@@ -45,6 +47,11 @@ type model struct {
 
 	addMotionHelp       help.Model
 	addMotionHelpKeymap additionalKeymap
+
+	deleteSelectedIndex int
+	deleteInput         textinput.Model
+	// deleteHelp  help.Model
+	// deleteHelpKeymap additionalKeymap
 }
 
 // Interface for new keymaps
@@ -75,6 +82,13 @@ func textInputModel() []textinput.Model {
 	return inputs
 }
 
+func newDeleteTextInput() textinput.Model {
+	t := textinput.New()
+	t.Placeholder = "y/n"
+	t.CharLimit = 5
+	return t
+}
+
 func initialModel(db db.DB, items []list.Item) model {
 	listKeys := newListKeymap()
 	addMotionKeys := newAddMotionKeymap()
@@ -85,6 +99,7 @@ func initialModel(db db.DB, items []list.Item) model {
 		list:                list.New(items, list.NewDefaultDelegate(), 0, 0),
 		addMotionHelp:       help.New(),
 		addMotionHelpKeymap: addMotionKeys,
+		deleteInput:         newDeleteTextInput(),
 	}
 
 	m.list.Title = "Vim Motions for Babies"
@@ -108,24 +123,40 @@ func (m *model) updateInputs(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Main update function which handles inputs and key presses
+// Calls other update functions based on the viewMode
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.viewMode == viewModeAdd {
+	switch m.viewMode {
+	case viewModeAdd:
 		return m.updateAddMotion(msg)
+	case viewModeDelete:
+		return m.deleteUpdate(msg)
+	default:
+		return m.updateList(msg)
 	}
-	return m.updateList(msg)
 }
 
 func (m *model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "esc" && m.list.IsFiltered() {
-			return m, tea.Quit
+		if m.list.IsFiltered() {
+			if msg.String() == "esc" {
+				return m, tea.Quit
+			}
 		}
-		if msg.String() == "n" && !m.list.IsFiltered() {
+
+		if msg.String() == "n" {
 			for _, input := range m.inputs {
 				input.SetValue("")
 			}
 			m.viewMode = viewModeAdd
+			return m, nil
+		}
+		if msg.String() == "d" {
+			m.viewMode = viewModeDelete
+			m.deleteInput.Focus()
+			m.deleteInput.SetValue("")
+			m.deleteSelectedIndex = m.list.Index()
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -199,11 +230,52 @@ func (m *model) updateAddMotion(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) View() string {
-	if m.viewMode == viewModeAdd {
-		return m.addMotionView()
+func (m model) deleteUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.viewMode = viewModeList
+			return m, nil
+		case "enter":
+			validConfirms := []string{"y", "yes"}
+			if m.deleteInput.Value() == "" {
+				m.viewMode = viewModeList
+				return m, nil
+			} else if !slices.Contains(validConfirms, strings.ToLower(m.deleteInput.Value())) {
+				m.deleteInput.SetValue("")
+				m.viewMode = viewModeList
+				return m, nil
+			}
+
+			selected := m.list.SelectedItem().(item)
+			selectedIndex := m.list.Index()
+			if err := m.db.Delete(selected.title); err != nil {
+				fmt.Println("Error deleting command:", err)
+				// temporarily force quit the app
+				return m, tea.Quit
+			}
+			m.list.RemoveItem(selectedIndex)
+			m.viewMode = viewModeList
+			return m, nil
+		}
 	}
-	return m.listView()
+
+	deleteModel, cmd := m.deleteInput.Update(msg)
+	m.deleteInput = deleteModel
+
+	return m, cmd
+}
+
+func (m model) View() string {
+	switch m.viewMode {
+	case viewModeAdd:
+		return m.addMotionView()
+	case viewModeDelete:
+		return m.deleteView()
+	default:
+		return m.listView()
+	}
 }
 
 func (m model) addMotionView() string {
@@ -225,6 +297,20 @@ func (m model) addMotionView() string {
 
 func (m model) listView() string {
 	return docStyle.Render(m.list.View())
+}
+
+func (m model) deleteView() string {
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Render("Are you sure you want to delete this motion? (y/n)\n\n"))
+	// TODO: add some styling for the selected item title
+	b.WriteString(m.list.SelectedItem().(item).title + "\n")
+
+	b.WriteString(m.deleteInput.View() + "\n")
+
+	helpView := m.addMotionHelp.View(m.addMotionHelpKeymap.(help.KeyMap))
+	b.WriteString("\n\n\n" + helpView)
+
+	return b.String()
 }
 
 // type errMsg struct {

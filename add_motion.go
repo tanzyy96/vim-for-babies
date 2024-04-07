@@ -47,16 +47,16 @@ func (km *addMotionKeymap) FullHelp() [][]key.Binding {
 func newAddMotionKeymap() additionalKeymap {
 	return &addMotionKeymap{
 		Up: key.NewBinding(
-			key.WithKeys("k", "up"),
+			key.WithKeys("up"),
 			key.WithHelp("up", "Up"),
 		),
 		Down: key.NewBinding(
-			key.WithKeys("j", "down"),
+			key.WithKeys("down"),
 			key.WithHelp("down", "Down"),
 		),
 		Submit: key.NewBinding(
-			key.WithKeys("shift+enter"),
-			key.WithHelp("shift+enter", "Submit"),
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "Submit"),
 		),
 		Esc: key.NewBinding(
 			key.WithKeys("esc"),

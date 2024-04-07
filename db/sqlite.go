@@ -22,6 +22,7 @@ type DB interface {
 	Init() error
 	Seed() error
 	Add(item Command) error
+	Delete(title string) error
 	GetAll() ([]Command, error)
 }
 
@@ -144,6 +145,14 @@ func (cdb CommandDb) Add(item Command) error {
 	_, err := cdb.db.Exec("INSERT INTO commands (title, description) VALUES (?, ?)", item.Title, item.Description)
 	if err != nil {
 		return fmt.Errorf("error adding item: %w", err)
+	}
+	return nil
+}
+
+func (cdb CommandDb) Delete(title string) error {
+	_, err := cdb.db.Exec("DELETE FROM commands WHERE title = ?", title)
+	if err != nil {
+		return fmt.Errorf("error deleting item: %w", err)
 	}
 	return nil
 }
